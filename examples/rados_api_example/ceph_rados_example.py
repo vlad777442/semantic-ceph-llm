@@ -6,8 +6,26 @@ This script demonstrates basic operations with the RADOS API on a Ceph cluster.
 
 import rados
 import sys
+import os
+
+def check_sudo():
+    """Check if script is running with sudo/root privileges."""
+    if os.geteuid() != 0:
+        print("=" * 50)
+        print("❌ ERROR: Insufficient Permissions")
+        print("=" * 50)
+        print("\nThis script requires sudo/root access to read Ceph keyring.")
+        print("\n🔧 Run with:")
+        print("   sudo ./ceph_rados_example.py")
+        print("\n   or")
+        print("   sudo python3 ceph_rados_example.py")
+        print("\n" + "=" * 50)
+        sys.exit(1)
 
 def main():
+    # Check for sudo first
+    check_sudo()
+    
     # Configuration - adjust these values for your setup
     CLUSTER_NAME = 'ceph'
     CONF_FILE = '/etc/ceph/ceph.conf'
@@ -17,8 +35,6 @@ def main():
     print("=" * 50)
     print("Ceph RADOS API Example")
     print("=" * 50)
-    print("\nNote: This script requires sudo access to read Ceph keyring")
-    print("Run with: sudo ./ceph_rados_example.py\n")
     
     try:
         # 1. Connect to the Ceph cluster
