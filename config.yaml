@@ -1,0 +1,107 @@
+# Ceph RADOS Configuration
+ceph:
+  config_file: /etc/ceph/ceph.conf
+  client_name: client.admin
+  cluster_name: ceph
+  pool_name: cephfs.cephfs.data
+  # Alternative pools for testing
+  # pool_name: testpool
+
+# Embedding Configuration
+embedding:
+  provider: sentence-transformers  # Options: sentence-transformers, openai
+  model: all-MiniLM-L6-v2  # Fast and efficient model (384 dimensions)
+  # Alternative models:
+  # - all-mpnet-base-v2 (768 dims, better quality, slower)
+  # - paraphrase-multilingual-MiniLM-L12-v2 (multilingual support)
+  device: cpu  # Options: cpu, cuda
+  batch_size: 32
+  normalize_embeddings: true
+  
+  # OpenAI configuration (when provider: openai)
+  # openai_api_key: ${OPENAI_API_KEY}
+  # openai_model: text-embedding-3-small
+
+# Vector Database Configuration
+vectordb:
+  type: chromadb
+  persist_directory: ./chroma_data
+  collection_name: ceph_semantic_objects
+  distance_metric: cosine  # Options: cosine, l2, ip
+  
+# LLM Configuration (for summarization and tagging)
+llm:
+  provider: local  # Options: local, openai, none
+  summarization_enabled: false  # Enable when ready
+  max_summary_length: 200
+  keywords_enabled: false
+  max_keywords: 10
+  
+  # Local model config
+  local_model: facebook/bart-large-cnn
+  
+  # OpenAI configuration
+  # openai_api_key: ${OPENAI_API_KEY}
+  # openai_model: gpt-3.5-turbo
+
+# Indexing Configuration
+indexing:
+  # Content processing
+  max_file_size_mb: 100
+  chunk_size: 1000  # Characters per chunk for large files
+  chunk_overlap: 200  # Overlap between chunks
+  
+  # File type support
+  supported_extensions:
+    - txt
+    - md
+    - py
+    - js
+    - java
+    - cpp
+    - c
+    - h
+    - json
+    - yaml
+    - yml
+    - xml
+    - csv
+    - log
+    - sh
+    - bash
+    - rst
+    - tex
+  
+  # Text extraction
+  encoding_detection: true
+  fallback_encoding: utf-8
+  
+  # Performance
+  batch_size: 10
+  parallel_processing: false  # Enable for large-scale indexing
+
+# Search Configuration
+search:
+  default_top_k: 10
+  max_top_k: 100
+  min_relevance_score: 0.0  # Minimum cosine similarity (0-1)
+  include_content_preview: true
+  preview_length: 500
+
+# Watcher Configuration
+watcher:
+  poll_interval_seconds: 60
+  enable_daemon: false
+  log_file: ./watcher.log
+
+# Logging Configuration
+logging:
+  level: INFO  # Options: DEBUG, INFO, WARNING, ERROR
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: ./semantic_storage.log
+
+# Performance and caching
+cache:
+  enable_embedding_cache: true
+  cache_directory: ./cache
+  max_cache_size_mb: 1000
