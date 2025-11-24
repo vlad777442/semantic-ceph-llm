@@ -12,8 +12,8 @@ from datetime import datetime
 import signal
 import sys
 
-from ..core.rados_client import RadosClient
-from .indexer import Indexer
+from core.rados_client import RadosClient
+from services.indexer import Indexer
 
 logger = logging.getLogger(__name__)
 

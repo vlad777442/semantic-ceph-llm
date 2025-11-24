@@ -138,9 +138,14 @@ class ContentProcessor:
         # Check extension
         if '.' in object_name:
             ext = object_name.rsplit('.', 1)[-1].lower()
-            return ext in self.supported_extensions
+            # Only treat as extension if it's alphanumeric and reasonable length
+            # This avoids treating CephFS internal names like "10000000000.00000000" as having extensions
+            if ext.isalpha() and len(ext) <= 10:
+                return ext in self.supported_extensions
+            # If it looks like a numeric suffix or other pattern, treat as no extension
+            # and check content type during extraction
         
-        # No extension, assume supported (will check content type later)
+        # No valid extension, assume supported (will check content type later)
         return True
     
     def extract_text(

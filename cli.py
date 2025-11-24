@@ -411,5 +411,189 @@ def similar(ctx, object_name, top_k):
         sys.exit(1)
 
 
+@cli.command()
+@click.argument('prompt', required=False)
+@click.option('--auto-confirm', '-y', is_flag=True, help='Auto-confirm destructive operations')
+@click.pass_context
+def execute(ctx, prompt: str, auto_confirm: bool):
+    """
+    Execute a single natural language command.
+    
+    Example: ./run.sh execute "search for files about greetings"
+    """
+    if not prompt:
+        console.print("[red]Error: Prompt required[/red]")
+        console.print("Usage: cli.py execute \"your natural language command\"")
+        sys.exit(1)
+    
+    try:
+        config = ctx.obj['config']
+        
+        # Check if agent is enabled
+        llm_config = config.get('llm', {})
+        if not llm_config.get('agent_enabled', False):
+            console.print("[red]Error: LLM agent is not enabled in config.yaml[/red]")
+            console.print("Set llm.agent_enabled: true in config.yaml")
+            sys.exit(1)
+        
+        console.print(f"\n[bold cyan]🤖 Processing:[/bold cyan] {prompt}\n")
+        
+        # Initialize components
+        from services.agent_service import AgentService
+        
+        rados_client = RadosClient(**config['ceph'])
+        embedding_gen = EmbeddingGenerator(**config['embedding'])
+        content_proc = ContentProcessor(**config['indexing'])
+        vector_store = VectorStore(**config['vectordb'])
+        
+        rados_client.connect()
+        
+        # Create agent service
+        agent_service = AgentService(
+            llm_config=llm_config,
+            rados_client=rados_client,
+            embedding_generator=embedding_gen,
+            content_processor=content_proc,
+            vector_store=vector_store
+        )
+        
+        # Execute command
+        result = agent_service.execute(prompt, auto_confirm=auto_confirm)
+        
+        # Display result
+        if result.success:
+            console.print(f"[green]✅ {result.message}[/green]")
+        else:
+            console.print(f"[red]❌ {result.message}[/red]")
+            if result.error:
+                console.print(f"[red]Error: {result.error}[/red]")
+        
+        # Show execution time
+        console.print(f"\n[dim]Execution time: {result.execution_time:.2f}s[/dim]")
+        
+        rados_client.disconnect()
+        
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Interrupted by user[/yellow]")
+        sys.exit(0)
+    except Exception as e:
+        console.print(f"\n[red]❌ Error: {e}[/red]")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+
+@cli.command()
+@click.option('--history-size', default=10, help='Number of messages to keep in history')
+@click.pass_context
+def chat(ctx, history_size: int):
+    """
+    Interactive chat mode with natural language interface.
+    
+    Chat with the LLM agent to perform operations on Ceph storage.
+    Type 'exit', 'quit', or press Ctrl+C to exit.
+    """
+    try:
+        config = ctx.obj['config']
+        
+        # Check if agent is enabled
+        llm_config = config.get('llm', {})
+        if not llm_config.get('agent_enabled', False):
+            console.print("[red]Error: LLM agent is not enabled in config.yaml[/red]")
+            console.print("Set llm.agent_enabled: true in config.yaml")
+            sys.exit(1)
+        
+        console.print("\n[bold cyan]🤖 Ceph Semantic Storage - AI Assistant[/bold cyan]")
+        console.print("[dim]Type 'exit' or 'quit' to end the session[/dim]\n")
+        
+        # Initialize components
+        from services.agent_service import AgentService
+        
+        rados_client = RadosClient(**config['ceph'])
+        embedding_gen = EmbeddingGenerator(**config['embedding'])
+        content_proc = ContentProcessor(**config['indexing'])
+        vector_store = VectorStore(**config['vectordb'])
+        
+        rados_client.connect()
+        console.print(f"[green]✅ Connected to pool: {config['ceph']['pool_name']}[/green]\n")
+        
+        # Create agent service
+        agent_service = AgentService(
+            llm_config=llm_config,
+            rados_client=rados_client,
+            embedding_generator=embedding_gen,
+            content_processor=content_proc,
+            vector_store=vector_store
+        )
+        
+        agent_service.agent.conversation.max_history = history_size
+        
+        # Chat loop
+        while True:
+            try:
+                # Get user input
+                user_input = console.input("[bold green]You:[/bold green] ").strip()
+                
+                if not user_input:
+                    continue
+                
+                if user_input.lower() in ['exit', 'quit', 'q']:
+                    console.print("\n[yellow]Goodbye! 👋[/yellow]")
+                    break
+                
+                if user_input.lower() in ['clear', 'reset']:
+                    agent_service.clear_history()
+                    console.print("[yellow]Conversation history cleared.[/yellow]\n")
+                    continue
+                
+                # Process query
+                console.print()
+                with console.status("[cyan]Thinking...[/cyan]"):
+                    result = agent_service.chat(user_input)
+                
+                # Check if confirmation needed
+                if not result.success and result.metadata.get('requires_user_confirmation'):
+                    console.print(f"[yellow]⚠️  This operation requires confirmation:[/yellow]")
+                    intent_data = result.metadata.get('intent', {})
+                    console.print(f"[yellow]Operation: {intent_data.get('operation')}[/yellow]")
+                    console.print(f"[yellow]Parameters: {intent_data.get('parameters')}[/yellow]")
+                    
+                    confirm = console.input("\n[bold]Proceed? (yes/no):[/bold] ").strip().lower()
+                    if confirm in ['yes', 'y']:
+                        # Re-execute with auto-confirm
+                        with console.status("[cyan]Executing...[/cyan]"):
+                            result = agent_service.execute(user_input, auto_confirm=True)
+                    else:
+                        console.print("[yellow]Operation cancelled.[/yellow]\n")
+                        continue
+                
+                # Display result
+                console.print(f"[bold cyan]Assistant:[/bold cyan] ", end="")
+                if result.success:
+                    console.print(result.message)
+                else:
+                    console.print(f"[red]{result.message}[/red]")
+                    if result.error:
+                        console.print(f"[red]Error: {result.error}[/red]")
+                
+                console.print()
+                
+            except KeyboardInterrupt:
+                console.print("\n[yellow]Interrupted. Type 'exit' to quit or continue chatting.[/yellow]\n")
+                continue
+            except EOFError:
+                console.print("\n[yellow]Goodbye! 👋[/yellow]")
+                break
+        
+        rados_client.disconnect()
+        
+    except Exception as e:
+        console.print(f"\n[red]❌ Error: {e}[/red]")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+
 if __name__ == '__main__':
     cli(obj={})
+

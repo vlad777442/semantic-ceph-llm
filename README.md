@@ -6,11 +6,33 @@ A semantic file system interface for Ceph/RADOS that enables natural language se
 
 This project implements a **semantic object storage layer** on top of Ceph RADOS, inspired by LSFS (LLM-based Semantic File System). It provides:
 
+- **🤖 Natural Language Interface**: Control your storage using plain English (NEW!)
 - **Semantic Indexing**: Automatically extract content and generate embeddings for RADOS objects
 - **Natural Language Search**: Query objects using natural language instead of exact filenames
 - **Vector Similarity**: Find semantically similar documents
 - **Automatic Monitoring**: Watch for new/modified objects and auto-index them
 - **Metadata Extraction**: Generate summaries, keywords, and tags (extensible to LLM-based)
+- **CRUD Operations**: Create, read, update, delete via natural language or CLI
+
+## 🆕 NEW: LLM Agent
+
+Interact with your Ceph storage using natural language!
+
+```bash
+# Interactive chat mode
+./run.sh chat
+
+You: search for files about greetings
+You: create a file called welcome.txt with "Hello World"
+You: show me storage statistics
+
+# One-shot commands
+./run.sh execute "find all Python files"
+./run.sh execute "delete test.txt"
+```
+
+**See [AGENT_GUIDE.md](AGENT_GUIDE.md) for complete documentation.**
+
 
 ## 🏗️ Architecture
 
@@ -98,25 +120,32 @@ ObjectMetadata:
 
 1. **Clone and navigate**:
    ```bash
-   cd /path/to/ceph_semantic_storage
+   cd /path/to/semantic-ceph-llm
    ```
 
-2. **Install Python dependencies**:
+2. **Install system dependencies**:
    ```bash
-   pip install -r requirements.txt
+   sudo apt-get update
+   sudo apt-get install -y python3-rados python3-venv python3-dev libmagic1 ceph-common
    ```
 
-   Or with sudo (if using system Python):
+3. **Create virtual environment**:
    ```bash
-   sudo pip3 install -r requirements.txt
+   python3 -m venv venv
+   source venv/bin/activate
    ```
 
-3. **Download embedding model** (automatic on first run):
+4. **Install Python dependencies**:
    ```bash
-   python3 -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+   # Create a requirements file without rados (it's system-wide)
+   grep -v "^rados" requirements.txt > requirements_venv.txt
+   pip install -r requirements_venv.txt
+   
+   # Link the system rados module to the virtual environment
+   ln -s /usr/lib/python3/dist-packages/rados*.so venv/lib/python3.*/site-packages/
    ```
 
-4. **Configure**:
+5. **Configure**:
    Edit `config.yaml` to match your setup:
    ```yaml
    ceph:
@@ -124,7 +153,7 @@ ObjectMetadata:
      pool_name: cephfs.cephfs.data  # Your pool name
    ```
 
-5. **Verify Ceph access**:
+6. **Verify Ceph access**:
    ```bash
    sudo ceph -s
    sudo ceph osd pool ls
@@ -132,12 +161,25 @@ ObjectMetadata:
 
 ## 📖 Usage
 
+### Running Commands
+
+Since Ceph keyring files require root permissions, you need to run commands with sudo while using the virtual environment's Python:
+
+```bash
+# Option 1: Use the convenience script
+./run.sh index
+
+# Option 2: Manually activate and run with sudo
+source venv/bin/activate
+sudo venv/bin/python cli.py index
+```
+
 ### Index Objects
 
 Index all objects in your Ceph pool:
 
 ```bash
-sudo python3 cli.py index
+./run.sh index
 ```
 
 Options:
@@ -148,13 +190,13 @@ Options:
 Examples:
 ```bash
 # Index only Python files
-sudo python3 cli.py index --prefix scripts/
+./run.sh index --prefix "python/"
 
 # Index first 100 objects
-sudo python3 cli.py index --limit 100
+./run.sh index --limit 100
 
 # Force reindex all
-sudo python3 cli.py index --force
+./run.sh index --force
 ```
 
 ### Search Objects
@@ -162,7 +204,7 @@ sudo python3 cli.py index --force
 Search using natural language:
 
 ```bash
-sudo python3 cli.py search "machine learning algorithms"
+./run.sh search "machine learning algorithms"
 ```
 
 Options:
@@ -175,7 +217,7 @@ Options:
 Examples:
 ```bash
 # Find configuration files
-sudo python3 cli.py search "yaml configuration files" --top-k 5
+./run.sh search "yaml configuration files" --top-k 5
 
 # Search with threshold
 sudo python3 cli.py search "database schema" --min-score 0.7

@@ -29,20 +29,26 @@ vectordb:
   collection_name: ceph_semantic_objects
   distance_metric: cosine  # Options: cosine, l2, ip
   
-# LLM Configuration (for summarization and tagging)
+# LLM Configuration (for agent and natural language interface)
 llm:
-  provider: local  # Options: local, openai, none
-  summarization_enabled: false  # Enable when ready
+  # Agent configuration
+  agent_enabled: true  # Enable natural language agent
+  provider: ollama  # Options: ollama, openai
+  model: llama3.2  # Ollama: llama3.2, llama3.1, mistral, qwen2.5 | OpenAI: gpt-4-turbo-preview, gpt-3.5-turbo
+  temperature: 0.1  # Lower = more focused, higher = more creative
+  max_tokens: 2000
+  
+  # Ollama configuration
+  ollama_host: http://localhost:11434
+  
+  # OpenAI configuration (when provider: openai)
+  # openai_api_key: ${OPENAI_API_KEY}
+  
+  # Legacy summarization config (for future use)
+  summarization_enabled: false
   max_summary_length: 200
   keywords_enabled: false
   max_keywords: 10
-  
-  # Local model config
-  local_model: facebook/bart-large-cnn
-  
-  # OpenAI configuration
-  # openai_api_key: ${OPENAI_API_KEY}
-  # openai_model: gpt-3.5-turbo
 
 # Indexing Configuration
 indexing:

@@ -11,11 +11,11 @@ from datetime import datetime
 from tqdm import tqdm
 import time
 
-from ..core.rados_client import RadosClient
-from ..core.embedding_generator import EmbeddingGenerator
-from ..core.content_processor import ContentProcessor
-from ..core.vector_store import VectorStore
-from ..core.metadata_schema import ObjectMetadata, IndexingStats
+from core.rados_client import RadosClient
+from core.embedding_generator import EmbeddingGenerator
+from core.content_processor import ContentProcessor
+from core.vector_store import VectorStore
+from core.metadata_schema import ObjectMetadata, IndexingStats
 
 logger = logging.getLogger(__name__)
 

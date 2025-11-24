@@ -1,0 +1,341 @@
+"""
+LLM provider abstraction supporting multiple backends.
+"""
+
+import json
+import logging
+from abc import ABC, abstractmethod
+from typing import List, Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
+
+
+class BaseLLMProvider(ABC):
+    """Abstract base class for LLM providers."""
+    
+    def __init__(self, model: str, temperature: float = 0.1, max_tokens: int = 2000):
+        self.model = model
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        logger.info(f"Initialized {self.__class__.__name__} with model: {model}")
+    
+    @abstractmethod
+    def complete(self, prompt: str, system: Optional[str] = None) -> str:
+        """Generate text completion."""
+        pass
+    
+    @abstractmethod
+    def chat(self, messages: List[Dict[str, str]]) -> str:
+        """Generate chat completion with message history."""
+        pass
+    
+    @abstractmethod
+    def function_call(self, prompt: str, tools: List[Dict], system: Optional[str] = None) -> Dict[str, Any]:
+        """Function calling / tool use."""
+        pass
+
+
+class OllamaProvider(BaseLLMProvider):
+    """
+    Ollama provider for local LLM inference.
+    
+    Supports models like: llama3.1, llama3.2, mistral, mixtral, qwen2.5, etc.
+    """
+    
+    def __init__(self, model: str = "llama3.2", host: str = "http://localhost:11434", **kwargs):
+        super().__init__(model, **kwargs)
+        self.host = host
+        
+        try:
+            import ollama
+            self.client = ollama.Client(host=host)
+            
+            # Verify model is available
+            try:
+                models = self.client.list()
+                available = [m['name'] for m in models.get('models', [])]
+                model_variants = [model, f"{model}:latest"]
+                
+                if not any(m in available for m in model_variants):
+                    logger.warning(f"Model {model} not found. Available: {available}")
+                    logger.info(f"Pulling model {model}...")
+                    self.client.pull(model)
+                    logger.info(f"Model {model} pulled successfully")
+            except Exception as e:
+                logger.error(f"Failed to verify/pull model: {e}")
+                
+        except ImportError:
+            logger.error("Ollama package not installed. Run: pip install ollama")
+            raise
+        except Exception as e:
+            logger.error(f"Failed to connect to Ollama at {host}: {e}")
+            logger.info("Make sure Ollama is running: 'ollama serve'")
+            raise
+    
+    def complete(self, prompt: str, system: Optional[str] = None) -> str:
+        """Generate text completion."""
+        try:
+            messages = []
+            if system:
+                messages.append({"role": "system", "content": system})
+            messages.append({"role": "user", "content": prompt})
+            
+            response = self.client.chat(
+                model=self.model,
+                messages=messages,
+                options={
+                    "temperature": self.temperature,
+                    "num_predict": self.max_tokens
+                }
+            )
+            
+            return response['message']['content']
+        
+        except Exception as e:
+            logger.error(f"Ollama completion failed: {e}")
+            raise
+    
+    def chat(self, messages: List[Dict[str, str]]) -> str:
+        """Generate chat completion with message history."""
+        try:
+            response = self.client.chat(
+                model=self.model,
+                messages=messages,
+                options={
+                    "temperature": self.temperature,
+                    "num_predict": self.max_tokens
+                }
+            )
+            
+            return response['message']['content']
+        
+        except Exception as e:
+            logger.error(f"Ollama chat failed: {e}")
+            raise
+    
+    def function_call(self, prompt: str, tools: List[Dict], system: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Function calling using Ollama with structured output.
+        """
+        try:
+            tools_description = self._format_tools(tools)
+            
+            function_prompt = f"""You are a function calling assistant. Based on the user's request, determine which function to call and extract the parameters.
+
+Available functions:
+{tools_description}
+
+User request: {prompt}
+
+Respond ONLY with a JSON object in this exact format:
+{{
+    "function": "function_name",
+    "parameters": {{
+        "param1": "value1",
+        "param2": "value2"
+    }},
+    "reasoning": "brief explanation"
+}}"""
+
+            messages = []
+            if system:
+                messages.append({"role": "system", "content": system})
+            messages.append({"role": "user", "content": function_prompt})
+            
+            response = self.client.chat(
+                model=self.model,
+                messages=messages,
+                format="json",
+                options={
+                    "temperature": self.temperature,
+                    "num_predict": self.max_tokens
+                }
+            )
+            
+            content = response['message']['content']
+            
+            # Parse JSON response
+            try:
+                result = json.loads(content)
+                return result
+            except json.JSONDecodeError:
+                # Try to extract JSON from response
+                import re
+                json_match = re.search(r'\{.*\}', content, re.DOTALL)
+                if json_match:
+                    return json.loads(json_match.group())
+                else:
+                    logger.error(f"Could not parse function call response: {content}")
+                    raise ValueError(f"Invalid JSON response from LLM")
+        
+        except Exception as e:
+            logger.error(f"Ollama function call failed: {e}")
+            raise
+    
+    def _format_tools(self, tools: List[Dict]) -> str:
+        """Format tools for prompt."""
+        formatted = []
+        for tool in tools:
+            name = tool.get('name', 'unknown')
+            desc = tool.get('description', '')
+            params = tool.get('parameters', {})
+            
+            param_lines = []
+            for pname, pinfo in params.items():
+                ptype = pinfo.get('type', 'string')
+                required = " (required)" if pinfo.get('required') else " (optional)"
+                default = f", default: {pinfo.get('default')}" if 'default' in pinfo else ""
+                pdesc = pinfo.get('description', '')
+                param_lines.append(f"  - {pname}: {ptype}{required}{default} - {pdesc}")
+            
+            params_str = "\n".join(param_lines) if param_lines else "  No parameters"
+            formatted.append(f"- {name}: {desc}\n{params_str}")
+        
+        return "\n\n".join(formatted)
+
+
+class OpenAIProvider(BaseLLMProvider):
+    """
+    OpenAI provider for GPT models with native function calling.
+    """
+    
+    def __init__(self, model: str = "gpt-4-turbo-preview", api_key: Optional[str] = None, **kwargs):
+        super().__init__(model, **kwargs)
+        
+        try:
+            import openai
+            self.client = openai.OpenAI(api_key=api_key)
+        except ImportError:
+            logger.error("OpenAI package not installed. Run: pip install openai")
+            raise
+    
+    def complete(self, prompt: str, system: Optional[str] = None) -> str:
+        """Generate text completion."""
+        try:
+            messages = []
+            if system:
+                messages.append({"role": "system", "content": system})
+            messages.append({"role": "user", "content": prompt})
+            
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens
+            )
+            
+            return response.choices[0].message.content
+        
+        except Exception as e:
+            logger.error(f"OpenAI completion failed: {e}")
+            raise
+    
+    def chat(self, messages: List[Dict[str, str]]) -> str:
+        """Generate chat completion with message history."""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens
+            )
+            
+            return response.choices[0].message.content
+        
+        except Exception as e:
+            logger.error(f"OpenAI chat failed: {e}")
+            raise
+    
+    def function_call(self, prompt: str, tools: List[Dict], system: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Function calling using OpenAI's native function calling API.
+        """
+        try:
+            messages = []
+            if system:
+                messages.append({"role": "system", "content": system})
+            messages.append({"role": "user", "content": prompt})
+            
+            # Convert tools to OpenAI format
+            openai_tools = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool['name'],
+                        "description": tool['description'],
+                        "parameters": {
+                            "type": "object",
+                            "properties": tool['parameters'],
+                            "required": [k for k, v in tool['parameters'].items() if v.get('required', False)]
+                        }
+                    }
+                }
+                for tool in tools
+            ]
+            
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                tools=openai_tools,
+                tool_choice="auto",
+                temperature=self.temperature,
+                max_tokens=self.max_tokens
+            )
+            
+            message = response.choices[0].message
+            
+            if message.tool_calls:
+                tool_call = message.tool_calls[0]
+                return {
+                    "function": tool_call.function.name,
+                    "parameters": json.loads(tool_call.function.arguments),
+                    "reasoning": message.content or "Function call"
+                }
+            else:
+                # No function call, return text response
+                return {
+                    "function": "unknown",
+                    "parameters": {},
+                    "reasoning": message.content
+                }
+        
+        except Exception as e:
+            logger.error(f"OpenAI function call failed: {e}")
+            raise
+
+
+def create_llm_provider(config: Dict[str, Any]) -> BaseLLMProvider:
+    """
+    Factory function to create LLM provider from config.
+    
+    Args:
+        config: Configuration dictionary with 'provider', 'model', etc.
+        
+    Returns:
+        Initialized LLM provider
+    """
+    provider_type = config.get('provider', 'ollama').lower()
+    model = config.get('model', 'llama3.2')
+    temperature = config.get('temperature', 0.1)
+    max_tokens = config.get('max_tokens', 2000)
+    
+    if provider_type == 'ollama':
+        host = config.get('ollama_host', 'http://localhost:11434')
+        return OllamaProvider(
+            model=model,
+            host=host,
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
+    
+    elif provider_type == 'openai':
+        api_key = config.get('api_key') or config.get('openai_api_key')
+        return OpenAIProvider(
+            model=model,
+            api_key=api_key,
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
+    
+    else:
+        raise ValueError(f"Unknown LLM provider: {provider_type}")

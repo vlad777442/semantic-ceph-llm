@@ -1,5 +1,4 @@
 # Core dependencies
-rados>=2.0.0  # Ceph RADOS Python bindings
 
 # Vector embeddings
 sentence-transformers>=2.2.0
@@ -28,10 +27,8 @@ tqdm>=4.65.0  # Progress bars
 python-magic>=0.4.27
 chardet>=5.1.0
 
-# LLM Integration
-ollama>=0.1.0  # Ollama Python client
-openai>=1.0.0  # OpenAI API (optional)
-httpx>=0.24.0  # HTTP client for API calls
+# Optional: OpenAI support (for future)
+# openai>=1.0.0
 
 # Utilities
 python-dateutil>=2.8.0
