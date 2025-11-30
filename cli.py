@@ -442,9 +442,32 @@ def execute(ctx, prompt: str, auto_confirm: bool):
         from services.agent_service import AgentService
         
         rados_client = RadosClient(**config['ceph'])
-        embedding_gen = EmbeddingGenerator(**config['embedding'])
-        content_proc = ContentProcessor(**config['indexing'])
-        vector_store = VectorStore(**config['vectordb'])
+        
+        # Map embedding config properly
+        emb_config = config['embedding']
+        embedding_gen = EmbeddingGenerator(
+            model_name=emb_config.get('model', 'all-MiniLM-L6-v2'),
+            device=emb_config.get('device', 'cpu'),
+            normalize_embeddings=emb_config.get('normalize_embeddings', True),
+            batch_size=emb_config.get('batch_size', 32)
+        )
+        
+        # Map indexing config properly
+        idx_config = config['indexing']
+        content_proc = ContentProcessor(
+            max_file_size_mb=idx_config.get('max_file_size_mb', 100),
+            encoding_detection=idx_config.get('encoding_detection', True),
+            fallback_encoding=idx_config.get('fallback_encoding', 'utf-8'),
+            supported_extensions=idx_config.get('supported_extensions', [])
+        )
+        
+        # Map vectordb config properly
+        vec_config = config['vectordb']
+        vector_store = VectorStore(
+            persist_directory=vec_config.get('persist_directory', './chroma_data'),
+            collection_name=vec_config.get('collection_name', 'ceph_semantic_objects'),
+            distance_metric=vec_config.get('distance_metric', 'cosine')
+        )
         
         rados_client.connect()
         
@@ -510,9 +533,32 @@ def chat(ctx, history_size: int):
         from services.agent_service import AgentService
         
         rados_client = RadosClient(**config['ceph'])
-        embedding_gen = EmbeddingGenerator(**config['embedding'])
-        content_proc = ContentProcessor(**config['indexing'])
-        vector_store = VectorStore(**config['vectordb'])
+        
+        # Map embedding config properly
+        emb_config = config['embedding']
+        embedding_gen = EmbeddingGenerator(
+            model_name=emb_config.get('model', 'all-MiniLM-L6-v2'),
+            device=emb_config.get('device', 'cpu'),
+            normalize_embeddings=emb_config.get('normalize_embeddings', True),
+            batch_size=emb_config.get('batch_size', 32)
+        )
+        
+        # Map indexing config properly
+        idx_config = config['indexing']
+        content_proc = ContentProcessor(
+            max_file_size_mb=idx_config.get('max_file_size_mb', 100),
+            encoding_detection=idx_config.get('encoding_detection', True),
+            fallback_encoding=idx_config.get('fallback_encoding', 'utf-8'),
+            supported_extensions=idx_config.get('supported_extensions', [])
+        )
+        
+        # Map vectordb config properly
+        vec_config = config['vectordb']
+        vector_store = VectorStore(
+            persist_directory=vec_config.get('persist_directory', './chroma_data'),
+            collection_name=vec_config.get('collection_name', 'ceph_semantic_objects'),
+            distance_metric=vec_config.get('distance_metric', 'cosine')
+        )
         
         rados_client.connect()
         console.print(f"[green]✅ Connected to pool: {config['ceph']['pool_name']}[/green]\n")

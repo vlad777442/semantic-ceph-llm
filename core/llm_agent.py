@@ -278,15 +278,15 @@ Generate a 1-2 sentence natural language response."""
     def _handle_search(self, params: Dict[str, Any]) -> OperationResult:
         """Handle semantic search operation."""
         query = params.get('query', '')
-        top_k = params.get('top_k', 10)
-        min_score = params.get('min_score', 0.0)
+        top_k = params.get('top_k') or 10  # Default to 10 if None or 0
+        min_score = params.get('min_score') or 0.0
         
         results = self.searcher.search(query, top_k=top_k, min_score=min_score)
         
         if results:
             summary = f"Found {len(results)} objects matching '{query}':\n"
             for i, r in enumerate(results[:5], 1):
-                summary += f"{i}. {r.object_name} (score: {r.score:.2f})\n"
+                summary += f"{i}. {r.object_name} (score: {r.relevance_score:.2f})\n"
             if len(results) > 5:
                 summary += f"... and {len(results) - 5} more"
         else:

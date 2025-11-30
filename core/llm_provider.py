@@ -52,17 +52,26 @@ class OllamaProvider(BaseLLMProvider):
             
             # Verify model is available
             try:
-                models = self.client.list()
-                available = [m['name'] for m in models.get('models', [])]
+                response = self.client.list()
+                # Handle both dict and ListResponse object formats
+                if hasattr(response, 'models'):
+                    available = [m.model for m in response.models]
+                elif isinstance(response, dict):
+                    available = [m.get('name', m.get('model', '')) for m in response.get('models', [])]
+                else:
+                    available = []
+                
                 model_variants = [model, f"{model}:latest"]
                 
-                if not any(m in available for m in model_variants):
+                if not any(m in available or any(m in a for a in available) for m in model_variants):
                     logger.warning(f"Model {model} not found. Available: {available}")
                     logger.info(f"Pulling model {model}...")
                     self.client.pull(model)
                     logger.info(f"Model {model} pulled successfully")
+                else:
+                    logger.info(f"Model {model} verified available")
             except Exception as e:
-                logger.error(f"Failed to verify/pull model: {e}")
+                logger.warning(f"Could not verify model availability: {e}")
                 
         except ImportError:
             logger.error("Ollama package not installed. Run: pip install ollama")

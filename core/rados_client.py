@@ -204,6 +204,47 @@ class RadosClient:
         
         return size_bytes, mtime
     
+    def get_pool_stats(self) -> Dict:
+        """
+        Get statistics for the current pool.
+        
+        Returns:
+            Dictionary with pool statistics
+        """
+        self.ensure_connected()
+        
+        try:
+            stats = self.ioctx.get_stats()
+            # Count objects
+            object_count = 0
+            total_size = 0
+            for obj in self.ioctx.list_objects():
+                object_count += 1
+                try:
+                    stat = self.ioctx.stat(obj.key)
+                    total_size += stat[0]
+                except:
+                    pass
+            
+            return {
+                "pool_name": self.pool_name,
+                "num_objects": object_count,
+                "size_bytes": total_size,
+                "size_kb": total_size / 1024,
+                "size_mb": total_size / (1024 * 1024),
+                "num_bytes": stats.get('num_bytes', 0),
+                "num_kb": stats.get('num_kb', 0),
+            }
+        except Exception as e:
+            logger.error(f"Failed to get pool stats: {e}")
+            return {
+                "pool_name": self.pool_name,
+                "num_objects": 0,
+                "size_bytes": 0,
+                "size_kb": 0,
+                "error": str(e)
+            }
+    
     def read_object(self, object_name: str, max_size: Optional[int] = None) -> bytes:
         """
         Read object content.
