@@ -17,6 +17,13 @@ from core.content_processor import ContentProcessor
 from core.vector_store import VectorStore
 from core.metadata_schema import ObjectMetadata, IndexingStats
 
+# Optional import for LLM metadata generation
+try:
+    from services.llm_metadata import LLMMetadataGenerator, GeneratedMetadata
+    LLM_METADATA_AVAILABLE = True
+except ImportError:
+    LLM_METADATA_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -286,3 +293,105 @@ class Indexer:
         except Exception as e:
             logger.error(f"Failed to get indexing status: {e}")
             return {"error": str(e)}
+    
+    def index_with_llm_metadata(
+        self,
+        object_name: str,
+        content: str,
+        size_bytes: int,
+        llm_config: Optional[Dict] = None,
+        user_description: Optional[str] = None,
+        use_llm: bool = True
+    ) -> Optional[ObjectMetadata]:
+        """
+        Index an object with LLM-generated metadata.
+        
+        This method is used after uploading a file to generate rich metadata
+        (summary, keywords, tags) using an LLM and store it in the vector database.
+        
+        Args:
+            object_name: Name of the object in Ceph
+            content: Text content of the object
+            size_bytes: Size of the object in bytes
+            llm_config: LLM configuration (required if use_llm=True)
+            user_description: Optional user-provided description hint
+            use_llm: Whether to use LLM for metadata generation
+            
+        Returns:
+            ObjectMetadata if successful, None otherwise
+        """
+        try:
+            # Generate object ID
+            object_id = self.rados_client.generate_object_id(object_name)
+            
+            # Initialize metadata fields
+            summary = user_description or ""
+            keywords = []
+            tags = []
+            
+            # Generate LLM metadata if enabled
+            if use_llm and llm_config:
+                if not LLM_METADATA_AVAILABLE:
+                    logger.warning("LLM metadata module not available, skipping LLM generation")
+                else:
+                    try:
+                        llm_generator = LLMMetadataGenerator(llm_config=llm_config)
+                        generated = llm_generator.generate(
+                            content=content,
+                            filename=object_name,
+                            user_description=user_description
+                        )
+                        summary = generated.summary
+                        keywords = generated.keywords
+                        tags = generated.tags
+                        logger.info(f"LLM generated metadata: {len(keywords)} keywords, {len(tags)} tags")
+                    except Exception as e:
+                        logger.warning(f"LLM metadata generation failed: {e}")
+                        # Continue with basic metadata
+            
+            # Preprocess content
+            text = self.content_processor.preprocess_text(content)
+            content_preview = self.content_processor.create_content_preview(text)
+            
+            # For embedding, combine content with summary for better semantic matching
+            embedding_text = text
+            if summary:
+                embedding_text = f"{summary}\n\n{text}"
+            
+            # Generate embedding
+            embedding = self.embedding_generator.encode(embedding_text)
+            
+            # Detect content type
+            content_type = self.content_processor.detect_content_type(
+                content.encode('utf-8'), 
+                object_name
+            )
+            
+            # Create metadata
+            metadata = ObjectMetadata(
+                object_id=object_id,
+                object_name=object_name,
+                pool_name=self.rados_client.pool_name,
+                content_type=content_type,
+                size_bytes=size_bytes,
+                encoding="utf-8",
+                modified_at=datetime.now(),
+                indexed_at=datetime.now(),
+                content_preview=content_preview,
+                full_text=text if len(text) < 10000 else None,
+                embedding_model=self.embedding_generator.model_name,
+                embedding_dimensions=self.embedding_generator.get_embedding_dimension(),
+                summary=summary if summary else None,
+                keywords=keywords,
+                tags=tags
+            )
+            
+            # Store in vector database
+            self.vector_store.add(object_id, embedding, metadata)
+            
+            logger.info(f"Successfully indexed with LLM metadata: {object_name}")
+            return metadata
+            
+        except Exception as e:
+            logger.error(f"Failed to index {object_name} with LLM metadata: {e}")
+            return None

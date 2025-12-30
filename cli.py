@@ -412,6 +412,143 @@ def similar(ctx, object_name, top_k):
 
 
 @cli.command()
+@click.argument('file_path', type=click.Path(exists=True))
+@click.option('--name', help='Custom object name in Ceph (default: filename)')
+@click.option('--description', '-d', help='Description of the file (improves LLM metadata)')
+@click.option('--index/--no-index', default=True, help='Index after upload (default: yes)')
+@click.option('--llm/--no-llm', default=True, help='Use LLM for metadata generation (default: yes)')
+@click.pass_context
+def upload(ctx, file_path: str, name: str, description: str, index: bool, llm: bool):
+    """
+    Upload a file to Ceph with LLM-generated metadata.
+    
+    Uploads a local file to the Ceph pool and optionally generates rich metadata
+    (summary, keywords, tags) using an LLM for better semantic search.
+    
+    Examples:
+    
+        ./run.sh upload myfile.txt
+        
+        ./run.sh upload report.pdf --description "Q3 financial report"
+        
+        ./run.sh upload code.py --name src/utils/code.py
+        
+        ./run.sh upload data.csv --no-llm
+    """
+    config = ctx.obj['config']
+    
+    # Resolve file path and name
+    file_path_obj = Path(file_path)
+    object_name = name or file_path_obj.name
+    
+    console.print(f"\n[bold cyan]📤 Uploading:[/bold cyan] {file_path}")
+    console.print(f"[bold cyan]   Target:[/bold cyan] {object_name}\n")
+    
+    try:
+        # Read file content
+        with open(file_path, 'rb') as f:
+            data = f.read()
+        
+        file_size = len(data)
+        console.print(f"📦 File size: {file_size / 1024:.1f} KB")
+        
+        # Create components
+        rados_client, embedding_gen, content_processor, vector_store = create_components(config)
+        
+        # Connect to Ceph
+        console.print("📡 Connecting to Ceph...")
+        rados_client.connect()
+        console.print(f"✅ Connected to pool: [green]{rados_client.pool_name}[/green]\n")
+        
+        # Check if object already exists
+        if rados_client.object_exists(object_name):
+            console.print(f"[yellow]⚠ Object '{object_name}' already exists. Overwriting...[/yellow]")
+        
+        # Upload to Ceph
+        console.print("📤 Writing to Ceph...")
+        rados_client.write_object(object_name, data)
+        console.print(f"✅ Uploaded: [green]{object_name}[/green]\n")
+        
+        # Index if requested
+        if index:
+            console.print("[bold cyan]🔍 Indexing with semantic metadata...[/bold cyan]")
+            
+            # Try to extract text content
+            try:
+                text_content, encoding = content_processor.extract_text(data, object_name)
+            except ValueError as e:
+                console.print(f"[yellow]⚠ Cannot extract text: {e}[/yellow]")
+                console.print("[yellow]   Skipping indexing for binary file.[/yellow]")
+                rados_client.disconnect()
+                return
+            
+            # Create indexer
+            indexer = Indexer(
+                rados_client=rados_client,
+                embedding_generator=embedding_gen,
+                content_processor=content_processor,
+                vector_store=vector_store
+            )
+            
+            # Get LLM config if using LLM
+            llm_config = config.get('llm', {}) if llm else None
+            
+            if llm and llm_config.get('agent_enabled', False):
+                console.print("🤖 Generating metadata with LLM...")
+            
+            # Index with LLM metadata
+            metadata = indexer.index_with_llm_metadata(
+                object_name=object_name,
+                content=text_content,
+                size_bytes=file_size,
+                llm_config=llm_config if llm else None,
+                user_description=description,
+                use_llm=llm and llm_config.get('agent_enabled', False)
+            )
+            
+            if metadata:
+                console.print(f"✅ Indexed successfully!\n")
+                
+                # Display metadata
+                table = Table(title="Generated Metadata")
+                table.add_column("Field", style="cyan")
+                table.add_column("Value", style="green")
+                
+                table.add_row("Object Name", metadata.object_name)
+                table.add_row("Size", f"{metadata.size_bytes / 1024:.1f} KB")
+                table.add_row("Content Type", metadata.content_type)
+                
+                if metadata.summary:
+                    # Truncate long summaries for display
+                    summary_display = metadata.summary[:150] + "..." if len(metadata.summary) > 150 else metadata.summary
+                    table.add_row("Summary", summary_display)
+                
+                if metadata.keywords:
+                    table.add_row("Keywords", ", ".join(metadata.keywords[:7]))
+                
+                if metadata.tags:
+                    table.add_row("Tags", ", ".join(metadata.tags))
+                
+                console.print(table)
+            else:
+                console.print("[yellow]⚠ Indexing completed with warnings[/yellow]")
+        else:
+            console.print("[dim]Skipping indexing (--no-index)[/dim]")
+        
+        rados_client.disconnect()
+        console.print(f"\n[bold green]✅ Upload complete![/bold green]")
+        
+    except FileNotFoundError:
+        console.print(f"\n[red]❌ File not found: {file_path}[/red]")
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"\n[red]❌ Error: {e}[/red]")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+
+@cli.command()
 @click.argument('prompt', required=False)
 @click.option('--auto-confirm', '-y', is_flag=True, help='Auto-confirm destructive operations')
 @click.pass_context
